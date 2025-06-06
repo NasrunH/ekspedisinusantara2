@@ -26,6 +26,17 @@
                         </div>
                         
                         <div class="col-md-6">
+                            <label for="id" class="form-label">ID Pengiriman <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control @error('id') is-invalid @enderror" 
+                                   id="id" name="id" value="{{ old('id', $nextId) }}" 
+                                   placeholder="1" required>
+                            @error('id')
+                                <div class="invalid-feedback">{{ $message }}</div>
+                            @enderror
+                            <small class="form-text text-muted">ID unik untuk pengiriman ini</small>
+                        </div>
+                        
+                        <div class="col-md-6">
                             <label for="tracking_number" class="form-label">Nomor Resi <span class="text-danger">*</span></label>
                             <input type="text" class="form-control @error('tracking_number') is-invalid @enderror" 
                                    id="tracking_number" name="tracking_number" value="{{ old('tracking_number') }}" 
@@ -156,4 +167,25 @@
         </div>
     </div>
 </div>
+
+@push('scripts')
+<script>
+// Auto-generate tracking number based on ID
+document.getElementById('id').addEventListener('input', function() {
+    const id = this.value;
+    if (id) {
+        const trackingNumber = 'EXP' + String(id).padStart(8, '0');
+        document.getElementById('tracking_number').value = trackingNumber;
+    }
+});
+
+// Trigger on page load if ID already has value
+document.addEventListener('DOMContentLoaded', function() {
+    const idField = document.getElementById('id');
+    if (idField.value) {
+        idField.dispatchEvent(new Event('input'));
+    }
+});
+</script>
+@endpush
 @endsection

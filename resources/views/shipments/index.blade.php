@@ -82,7 +82,7 @@
                                 </td>
                                 <td>{{ $shipment->sender_name }}</td>
                                 <td>{{ $shipment->recipient_name }}</td>
-                                <td>{{ $shipment->weight }} kg</td>
+                                <td>{{ number_format($shipment->weight / 1000, 2) }} kg</td>
                                 <td>
                                     @php
                                         $badgeClass = 'warning';

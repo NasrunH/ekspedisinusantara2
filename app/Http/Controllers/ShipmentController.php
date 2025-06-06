@@ -36,7 +36,9 @@ class ShipmentController extends Controller
      */
     public function create()
     {
-        return view('shipments.create');
+        // Get next available ID
+        $nextId = $this->getNextId();
+        return view('shipments.create', compact('nextId'));
     }
 
     /**
@@ -45,13 +47,14 @@ class ShipmentController extends Controller
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'tracking_number' => 'required|string|max:20|unique:shipments',
-            'sender_name' => 'required|string|max:100',
+            'id' => 'required|integer|unique:shipments',
+            'tracking_number' => 'required|string|max:255|unique:shipments',
+            'sender_name' => 'required|string|max:255',
             'sender_address' => 'required|string',
-            'sender_phone' => 'required|string|max:20',
-            'recipient_name' => 'required|string|max:100',
+            'sender_phone' => 'required|string|max:255',
+            'recipient_name' => 'required|string|max:255',
             'recipient_address' => 'required|string',
-            'recipient_phone' => 'required|string|max:20',
+            'recipient_phone' => 'required|string|max:255',
             'weight' => 'required|numeric|min:0.01',
             'description' => 'nullable|string',
             'status' => 'required|in:pending,in_transit,delivered',
@@ -66,7 +69,15 @@ class ShipmentController extends Controller
         try {
             DB::beginTransaction();
 
-            $shipment = Shipment::create($request->all());
+            // Konversi weight dari kg ke gram
+            $data = $request->all();
+            $data['weight'] = $request->weight * 1000; // Convert kg to grams
+            
+            // Set tanggal dengan format yang benar
+            $data['created_at'] = now()->format('Y-m-d');
+            $data['updated_at'] = now()->format('Y-m-d');
+
+            $shipment = Shipment::create($data);
 
             DB::commit();
 
@@ -103,13 +114,13 @@ class ShipmentController extends Controller
     public function update(Request $request, Shipment $shipment)
     {
         $validator = Validator::make($request->all(), [
-            'tracking_number' => 'required|string|max:20|unique:shipments,tracking_number,' . $shipment->id,
-            'sender_name' => 'required|string|max:100',
+            'tracking_number' => 'required|string|max:255|unique:shipments,tracking_number,' . $shipment->id,
+            'sender_name' => 'required|string|max:255',
             'sender_address' => 'required|string',
-            'sender_phone' => 'required|string|max:20',
-            'recipient_name' => 'required|string|max:100',
+            'sender_phone' => 'required|string|max:255',
+            'recipient_name' => 'required|string|max:255',
             'recipient_address' => 'required|string',
-            'recipient_phone' => 'required|string|max:20',
+            'recipient_phone' => 'required|string|max:255',
             'weight' => 'required|numeric|min:0.01',
             'description' => 'nullable|string',
             'status' => 'required|in:pending,in_transit,delivered',
@@ -124,7 +135,12 @@ class ShipmentController extends Controller
         try {
             DB::beginTransaction();
 
-            $shipment->update($request->all());
+            // Konversi weight dari kg ke gram
+            $data = $request->all();
+            $data['weight'] = $request->weight * 1000; // Convert kg to grams
+            $data['updated_at'] = now()->format('Y-m-d');
+
+            $shipment->update($data);
 
             DB::commit();
 
@@ -192,9 +208,9 @@ class ShipmentController extends Controller
                 'status_label' => $shipment->status_label,
                 'sender_name' => $shipment->sender_name,
                 'recipient_name' => $shipment->recipient_name,
-                'weight' => $shipment->weight,
-                'created_at' => $shipment->created_at->format('d/m/Y H:i'),
-                'updated_at' => $shipment->updated_at->format('d/m/Y H:i'),
+                'weight' => number_format($shipment->weight / 1000, 2),
+                'created_at' => $shipment->created_at,
+                'updated_at' => $shipment->updated_at,
             ]
         ]);
     }
@@ -205,25 +221,55 @@ class ShipmentController extends Controller
     public function syncDatabases()
     {
         try {
-            $mysqlShipments = DB::connection('mysql')->table('shipments')->get();
+            $deviceName = config('app.device_name', 'device_1');
             
-            foreach ($mysqlShipments as $shipment) {
-                DB::connection('pgsql')->table('shipments')->updateOrInsert(
-                    ['id' => $shipment->id],
-                    (array) $shipment
-                );
+            if ($deviceName === 'device_1') {
+                // Sync MySQL to PostgreSQL
+                $mysqlShipments = DB::connection('mysql')->table('shipments')->get();
+                
+                foreach ($mysqlShipments as $shipment) {
+                    DB::connection('pgsql')->table('shipments')->updateOrInsert(
+                        ['id' => $shipment->id],
+                        (array) $shipment
+                    );
+                }
+                
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Sinkronisasi MySQL ke PostgreSQL berhasil',
+                    'synced_records' => $mysqlShipments->count()
+                ]);
+            } else {
+                // Sync PostgreSQL to MySQL
+                $postgresShipments = DB::connection('pgsql')->table('shipments')->get();
+                
+                foreach ($postgresShipments as $shipment) {
+                    DB::connection('mysql_secondary')->table('shipments')->updateOrInsert(
+                        ['id' => $shipment->id],
+                        (array) $shipment
+                    );
+                }
+                
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Sinkronisasi PostgreSQL ke MySQL berhasil',
+                    'synced_records' => $postgresShipments->count()
+                ]);
             }
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Sinkronisasi database berhasil',
-                'synced_records' => $mysqlShipments->count()
-            ]);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal sinkronisasi database: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Get next available ID
+     */
+    private function getNextId()
+    {
+        $lastShipment = Shipment::orderBy('id', 'desc')->first();
+        return $lastShipment ? $lastShipment->id + 1 : 1;
     }
 }

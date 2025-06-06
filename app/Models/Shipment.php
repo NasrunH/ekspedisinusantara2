@@ -2,15 +2,16 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\DB;
 
 class Shipment extends Model
 {
-    use HasFactory;
-
+    // Disable Laravel's automatic timestamps
+    public $timestamps = false;
+    
+    // Allow mass assignment for id
     protected $fillable = [
+        'id',
         'tracking_number',
         'sender_name',
         'sender_address',
@@ -21,12 +22,13 @@ class Shipment extends Model
         'weight',
         'description',
         'status',
+        'created_at',
+        'updated_at'
     ];
 
     protected $casts = [
-        'weight' => 'decimal:2',
-        'created_at' => 'datetime',
-        'updated_at' => 'datetime',
+        'created_at' => 'date',
+        'updated_at' => 'date',
     ];
 
     /**
@@ -51,6 +53,14 @@ class Shipment extends Model
     }
 
     /**
+     * Get weight in kg
+     */
+    public function getWeightKgAttribute()
+    {
+        return number_format($this->weight / 1000, 2);
+    }
+
+    /**
      * Scope untuk filter berdasarkan status
      */
     public function scopeByStatus($query, $status)
@@ -67,52 +77,6 @@ class Shipment extends Model
             $q->where('tracking_number', 'like', "%{$search}%")
               ->orWhere('sender_name', 'like', "%{$search}%")
               ->orWhere('recipient_name', 'like', "%{$search}%");
-        });
-    }
-
-    /**
-     * Replikasi data ke database lain
-     */
-    public function replicateToSecondaryDatabase()
-    {
-        try {
-            // Replikasi ke PostgreSQL
-            DB::connection('pgsql')->table('shipments')->updateOrInsert(
-                ['id' => $this->id],
-                $this->toArray()
-            );
-            
-            \Log::info("Data shipment ID {$this->id} berhasil direplikasi ke PostgreSQL");
-        } catch (\Exception $e) {
-            \Log::error("Gagal mereplikasi data shipment ID {$this->id} ke PostgreSQL: " . $e->getMessage());
-        }
-    }
-
-    /**
-     * Event listeners
-     */
-    protected static function boot()
-    {
-        parent::boot();
-
-        // Replikasi setelah create
-        static::created(function ($shipment) {
-            $shipment->replicateToSecondaryDatabase();
-        });
-
-        // Replikasi setelah update
-        static::updated(function ($shipment) {
-            $shipment->replicateToSecondaryDatabase();
-        });
-
-        // Replikasi setelah delete
-        static::deleted(function ($shipment) {
-            try {
-                DB::connection('pgsql')->table('shipments')->where('id', $shipment->id)->delete();
-                \Log::info("Data shipment ID {$shipment->id} berhasil dihapus dari PostgreSQL");
-            } catch (\Exception $e) {
-                \Log::error("Gagal menghapus data shipment ID {$shipment->id} dari PostgreSQL: " . $e->getMessage());
-            }
         });
     }
 }
