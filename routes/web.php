@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\ShipmentController;
-use App\Http\Controllers\DatabaseTestController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -14,16 +13,10 @@ Route::get('/', function () {
     return view('welcome');
 });
 
-// Shipment routes
-Route::resource('shipments', ShipmentController::class);
+// Shipment routes - Modified for Device 2 (Status Update Only)
+Route::resource('shipments', ShipmentController::class)->except(['create', 'store', 'destroy']);
 
 // API routes
 Route::get('/api/track', [ShipmentController::class, 'track'])->name('api.track');
-
-// Sync route dengan middleware web
-Route::middleware(['web'])->group(function () {
-    Route::post('/api/sync-databases', [ShipmentController::class, 'syncDatabases'])->name('api.sync');
-});
-
-// Database test route
-Route::get('/test-db', [DatabaseTestController::class, 'testConnections']);
+Route::post('/api/sync-databases', [ShipmentController::class, 'syncDatabases'])->name('api.sync');
+Route::put('/api/shipments/{shipment}/status', [ShipmentController::class, 'updateStatus'])->name('api.update-status');

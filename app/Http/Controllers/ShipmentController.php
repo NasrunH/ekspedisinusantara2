@@ -27,70 +27,37 @@ class ShipmentController extends Controller
             $query->search($request->search);
         }
 
-        $shipments = $query->orderBy('created_at', 'desc')->paginate(10);
+        $shipments = $query->orderBy('created_at', 'desc')->paginate(12);
 
-        return view('shipments.index', compact('shipments'));
+        // Get statistics from PostgreSQL
+        $stats = [
+            'total' => Shipment::count(),
+            'pending' => Shipment::where('status', 'pending')->count(),
+            'in_transit' => Shipment::where('status', 'in_transit')->count(),
+            'delivered' => Shipment::where('status', 'delivered')->count(),
+        ];
+
+        return view('shipments.index', compact('shipments', 'stats'));
     }
 
     /**
      * Show the form for creating a new resource.
+     * DISABLED for Device 2 - Only status updates allowed
      */
     public function create()
     {
-        // Get next available ID
-        $nextId = $this->getNextId();
-        return view('shipments.create', compact('nextId'));
+        return redirect()->route('shipments.index')
+            ->with('error', 'Device 2 hanya dapat mengupdate status pengiriman. Untuk membuat pengiriman baru, gunakan Device 1.');
     }
 
     /**
      * Store a newly created resource in storage.
+     * DISABLED for Device 2 - Only status updates allowed
      */
     public function store(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'id' => 'required|integer|unique:shipments',
-            'tracking_number' => 'required|string|max:255|unique:shipments',
-            'sender_name' => 'required|string|max:255',
-            'sender_address' => 'required|string',
-            'sender_phone' => 'required|string|max:255',
-            'recipient_name' => 'required|string|max:255',
-            'recipient_address' => 'required|string',
-            'recipient_phone' => 'required|string|max:255',
-            'weight' => 'required|numeric|min:0.01',
-            'description' => 'nullable|string',
-            'status' => 'required|in:pending,in_transit,delivered',
-        ]);
-
-        if ($validator->fails()) {
-            return redirect()->back()
-                ->withErrors($validator)
-                ->withInput();
-        }
-
-        try {
-            DB::beginTransaction();
-
-            // Prepare data - weight is converted from kg to grams (integer)
-            $data = $request->all();
-            $data['weight'] = (int)($request->weight * 1000); // Convert kg to grams as integer
-            
-            // Set tanggal dengan format yang benar untuk date type
-            $data['created_at'] = now()->format('Y-m-d');
-            $data['updated_at'] = now()->format('Y-m-d');
-
-            $shipment = Shipment::create($data);
-
-            DB::commit();
-
-            return redirect()->route('shipments.index')
-                ->with('success', 'Pengiriman berhasil ditambahkan!');
-        } catch (\Exception $e) {
-            DB::rollback();
-            
-            return redirect()->back()
-                ->with('error', 'Gagal menambahkan pengiriman: ' . $e->getMessage())
-                ->withInput();
-        }
+        return redirect()->route('shipments.index')
+            ->with('error', 'Device 2 hanya dapat mengupdate status pengiriman. Untuk membuat pengiriman baru, gunakan Device 1.');
     }
 
     /**
@@ -103,79 +70,77 @@ class ShipmentController extends Controller
 
     /**
      * Show the form for editing the specified resource.
+     * MODIFIED for Device 2 - Only status editing allowed
      */
     public function edit(Shipment $shipment)
     {
-        return view('shipments.edit', compact('shipment'));
+        return view('shipments.edit-status', compact('shipment'));
     }
 
     /**
      * Update the specified resource in storage.
+     * MODIFIED for Device 2 - Only status updates allowed
      */
     public function update(Request $request, Shipment $shipment)
     {
         $validator = Validator::make($request->all(), [
-            'tracking_number' => 'required|string|max:255|unique:shipments,tracking_number,' . $shipment->id,
-            'sender_name' => 'required|string|max:255',
-            'sender_address' => 'required|string',
-            'sender_phone' => 'required|string|max:255',
-            'recipient_name' => 'required|string|max:255',
-            'recipient_address' => 'required|string',
-            'recipient_phone' => 'required|string|max:255',
-            'weight' => 'required|numeric|min:0.01',
-            'description' => 'nullable|string',
             'status' => 'required|in:pending,in_transit,delivered',
+        ], [
+            'status.required' => 'Status wajib dipilih.',
+            'status.in' => 'Status tidak valid.',
         ]);
 
         if ($validator->fails()) {
             return redirect()->back()
                 ->withErrors($validator)
-                ->withInput();
+                ->withInput()
+                ->with('error', 'Status yang dipilih tidak valid.');
         }
 
         try {
             DB::beginTransaction();
 
-            // Prepare data - weight is converted from kg to grams (integer)
-            $data = $request->all();
-            $data['weight'] = (int)($request->weight * 1000); // Convert kg to grams as integer
-            $data['updated_at'] = now()->format('Y-m-d');
+            $oldStatus = $shipment->status;
+            $newStatus = $request->status;
 
-            $shipment->update($data);
+            // Only update status
+            $shipment->update([
+                'status' => $newStatus
+            ]);
 
             DB::commit();
 
+            Log::info("[Device 2] Status updated successfully", [
+                'shipment_id' => $shipment->id,
+                'tracking_number' => $shipment->tracking_number,
+                'old_status' => $oldStatus,
+                'new_status' => $newStatus,
+                'updated_by' => 'Device 2'
+            ]);
+
             return redirect()->route('shipments.show', $shipment)
-                ->with('success', 'Pengiriman berhasil diperbarui!');
+                ->with('success', "Status pengiriman {$shipment->tracking_number} berhasil diubah dari {$oldStatus} ke {$newStatus}! 🔄");
         } catch (\Exception $e) {
             DB::rollback();
             
+            Log::error('[Device 2] Error updating status: ' . $e->getMessage(), [
+                'shipment_id' => $shipment->id,
+                'error' => $e->getMessage()
+            ]);
+            
             return redirect()->back()
-                ->with('error', 'Gagal memperbarui pengiriman: ' . $e->getMessage())
-                ->withInput();
+                ->with('error', 'Gagal memperbarui status: ' . $e->getMessage());
         }
     }
 
     /**
      * Remove the specified resource from storage.
+     * DISABLED for Device 2 - Only status updates allowed
      */
     public function destroy(Shipment $shipment)
     {
-        try {
-            DB::beginTransaction();
-
-            $shipment->delete();
-
-            DB::commit();
-
-            return redirect()->route('shipments.index')
-                ->with('success', 'Pengiriman berhasil dihapus!');
-        } catch (\Exception $e) {
-            DB::rollback();
-            
-            return redirect()->back()
-                ->with('error', 'Gagal menghapus pengiriman: ' . $e->getMessage());
-        }
+        return redirect()->route('shipments.index')
+            ->with('error', 'Device 2 hanya dapat mengupdate status pengiriman. Untuk menghapus pengiriman, gunakan Device 1.');
     }
 
     /**
@@ -207,116 +172,145 @@ class ShipmentController extends Controller
                 'tracking_number' => $shipment->tracking_number,
                 'status' => $shipment->status,
                 'status_label' => $shipment->status_label,
+                'status_icon' => $shipment->status_icon,
                 'sender_name' => $shipment->sender_name,
                 'recipient_name' => $shipment->recipient_name,
-                'weight' => number_format($shipment->weight / 1000, 2), // Convert grams to kg
-                'created_at' => $shipment->created_at,
-                'updated_at' => $shipment->updated_at,
+                'weight' => $shipment->weight_kg,
+                'description' => $shipment->description,
+                'created_at' => $shipment->formatted_created_at,
+                'updated_at' => $shipment->formatted_updated_at,
             ]
         ]);
     }
 
     /**
-     * Sync data between databases - UPDATED FOR RAILWAY STRUCTURE
+     * Sync databases - Pull data from MySQL to PostgreSQL
      */
     public function syncDatabases(Request $request)
     {
         try {
-            // Log untuk debugging
-            Log::info('Sync request received', [
-                'method' => $request->method(),
-                'headers' => $request->headers->all(),
-                'is_ajax' => $request->ajax()
-            ]);
+            Log::info('[Device 2] Sync request received - Pulling from MySQL to PostgreSQL');
 
-            // Test koneksi MySQL
+            // Test connections
             try {
-                $mysqlTest = DB::connection('mysql')->select('SELECT 1 as test');
-                Log::info('MySQL connection test passed');
+                DB::connection('mysql')->select('SELECT 1 as test');
+                Log::info('[Device 2] MySQL connection OK');
             } catch (\Exception $e) {
-                Log::error('MySQL connection failed: ' . $e->getMessage());
                 return response()->json([
                     'success' => false,
                     'message' => 'Koneksi MySQL gagal: ' . $e->getMessage()
                 ], 500);
             }
 
-            // Test koneksi PostgreSQL
             try {
-                $pgsqlTest = DB::connection('pgsql')->select('SELECT 1 as test');
-                Log::info('PostgreSQL connection test passed');
+                DB::connection('pgsql')->select('SELECT 1 as test');
+                Log::info('[Device 2] PostgreSQL connection OK');
             } catch (\Exception $e) {
-                Log::error('PostgreSQL connection failed: ' . $e->getMessage());
                 return response()->json([
                     'success' => false,
                     'message' => 'Koneksi PostgreSQL gagal: ' . $e->getMessage()
                 ], 500);
             }
 
-            // Ambil data dari MySQL
+            // Pull data from MySQL (Device 1) to PostgreSQL (Device 2)
             $mysqlShipments = DB::connection('mysql')->table('shipments')->get();
-            Log::info('MySQL data retrieved', ['count' => $mysqlShipments->count()]);
-
             $syncCount = 0;
             $errors = [];
 
-            // Sinkronisasi ke PostgreSQL
             foreach ($mysqlShipments as $shipment) {
                 try {
                     $shipmentArray = (array) $shipment;
                     
-                    // Cek apakah record sudah ada
                     $exists = DB::connection('pgsql')
                         ->table('shipments')
                         ->where('id', $shipment->id)
                         ->exists();
                     
                     if ($exists) {
-                        // Update
+                        // Update existing record
                         DB::connection('pgsql')
                             ->table('shipments')
                             ->where('id', $shipment->id)
                             ->update($shipmentArray);
                     } else {
-                        // Insert
+                        // Insert new record
                         DB::connection('pgsql')
                             ->table('shipments')
                             ->insert($shipmentArray);
                     }
                     
                     $syncCount++;
-                    Log::info('Synced record', ['id' => $shipment->id]);
-                    
                 } catch (\Exception $e) {
-                    $error = "Error sync ID {$shipment->id}: " . $e->getMessage();
-                    $errors[] = $error;
-                    Log::error($error);
+                    $errors[] = "Error sync ID {$shipment->id}: " . $e->getMessage();
                 }
             }
 
             $response = [
                 'success' => true,
-                'message' => 'Sinkronisasi berhasil',
+                'message' => 'Sinkronisasi berhasil! Data ditarik dari MySQL ke PostgreSQL 🔄',
                 'synced_records' => $syncCount,
                 'total_records' => $mysqlShipments->count(),
-                'device' => env('DEVICE_NAME', 'unknown')
+                'device' => 'Device 2 - Status Update Interface',
+                'sync_direction' => 'MySQL → PostgreSQL',
+                'timestamp' => now()->format('d/m/Y H:i:s')
             ];
 
             if (!empty($errors)) {
                 $response['warnings'] = $errors;
             }
 
-            Log::info('Sync completed', $response);
+            Log::info('[Device 2] Sync completed', $response);
             return response()->json($response);
 
         } catch (\Exception $e) {
-            Log::error('Sync failed with exception: ' . $e->getMessage(), [
-                'trace' => $e->getTraceAsString()
-            ]);
+            Log::error('[Device 2] Sync failed: ' . $e->getMessage());
             
             return response()->json([
                 'success' => false,
                 'message' => 'Error: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Quick status update API
+     */
+    public function updateStatus(Request $request, Shipment $shipment)
+    {
+        $validator = Validator::make($request->all(), [
+            'status' => 'required|in:pending,in_transit,delivered',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Status tidak valid'
+            ], 400);
+        }
+
+        try {
+            $oldStatus = $shipment->status;
+            $newStatus = $request->status;
+
+            $shipment->update(['status' => $newStatus]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Status berhasil diubah dari {$oldStatus} ke {$newStatus}",
+                'data' => [
+                    'id' => $shipment->id,
+                    'tracking_number' => $shipment->tracking_number,
+                    'old_status' => $oldStatus,
+                    'new_status' => $newStatus,
+                    'status_label' => $shipment->status_label,
+                    'status_icon' => $shipment->status_icon,
+                    'updated_at' => $shipment->formatted_updated_at
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengupdate status: ' . $e->getMessage()
             ], 500);
         }
     }

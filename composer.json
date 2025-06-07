@@ -1,8 +1,8 @@
 {
-  "name": "laravel/expedition-app",
+  "name": "laravel/expedition-device2",
   "type": "project",
-  "description": "Aplikasi Ekspedisi Pengiriman Barang",
-  "keywords": ["laravel", "expedition", "shipping"],
+  "description": "Aplikasi Ekspedisi Device 2 - Modern Dark Theme",
+  "keywords": ["laravel", "expedition", "shipping", "device2"],
   "license": "MIT",
   "require": {
     "php": "^8.1",

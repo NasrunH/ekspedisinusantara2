@@ -4,13 +4,13 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class Shipment extends Model
 {
-    // Disable Laravel's automatic timestamps
-    public $timestamps = false;
+    // Use PostgreSQL as default connection for Device 2
+    protected $connection = 'pgsql';
     
-    // Allow mass assignment for all fields
     protected $fillable = [
         'id',
         'tracking_number',
@@ -23,13 +23,11 @@ class Shipment extends Model
         'weight',
         'description',
         'status',
-        'created_at',
-        'updated_at'
     ];
 
     protected $casts = [
-        'created_at' => 'date',
-        'updated_at' => 'date',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
         'weight' => 'integer',
     ];
 
@@ -55,11 +53,53 @@ class Shipment extends Model
     }
 
     /**
-     * Get weight in kg (since weight is stored as grams in integer)
+     * Get status icon
+     */
+    public function getStatusIconAttribute()
+    {
+        $icons = [
+            'pending' => '🕐',
+            'in_transit' => '🚚',
+            'delivered' => '✅',
+        ];
+        return $icons[$this->status] ?? '📦';
+    }
+
+    /**
+     * Get status color for UI
+     */
+    public function getStatusColorAttribute()
+    {
+        $colors = [
+            'pending' => 'yellow',
+            'in_transit' => 'blue',
+            'delivered' => 'green',
+        ];
+        return $colors[$this->status] ?? 'gray';
+    }
+
+    /**
+     * Get weight in kg
      */
     public function getWeightKgAttribute()
     {
         return number_format($this->weight / 1000, 2);
+    }
+
+    /**
+     * Get formatted created at
+     */
+    public function getFormattedCreatedAtAttribute()
+    {
+        return $this->created_at->format('d/m/Y H:i:s');
+    }
+
+    /**
+     * Get formatted updated at
+     */
+    public function getFormattedUpdatedAtAttribute()
+    {
+        return $this->updated_at->format('d/m/Y H:i:s');
     }
 
     /**
@@ -83,70 +123,42 @@ class Shipment extends Model
     }
 
     /**
-     * Boot the model.
+     * Boot the model - Auto sync to MySQL (Device 1)
      */
     protected static function boot()
     {
         parent::boot();
         
-        // Automatically replicate data to the other database after save
-        static::saved(function ($shipment) {
+        // Only sync status updates to MySQL
+        static::updated(function ($shipment) {
             try {
-                // Get the current connection name
-                $currentConnection = $shipment->getConnectionName() ?: config('database.default');
-                
-                // Determine the target connection
-                $targetConnection = ($currentConnection === 'mysql') ? 'pgsql' : 'mysql';
-                
-                // Get the attributes to replicate
-                $attributes = $shipment->getAttributes();
-                
-                // Check if the record exists in the target database
-                $exists = DB::connection($targetConnection)
-                    ->table('shipments')
-                    ->where('id', $shipment->id)
-                    ->exists();
-                
-                if ($exists) {
-                    // Update existing record
-                    DB::connection($targetConnection)
+                // Only sync if status was changed
+                if ($shipment->isDirty('status')) {
+                    $attributes = [
+                        'status' => $shipment->status,
+                        'updated_at' => $shipment->updated_at->format('Y-m-d H:i:s'),
+                    ];
+                    
+                    // Update status in MySQL (Device 1)
+                    $updated = DB::connection('mysql')
                         ->table('shipments')
                         ->where('id', $shipment->id)
                         ->update($attributes);
-                } else {
-                    // Insert new record
-                    DB::connection($targetConnection)
-                        ->table('shipments')
-                        ->insert($attributes);
+                    
+                    if ($updated) {
+                        Log::info("[Device 2] Status updated and synced to MySQL", [
+                            'shipment_id' => $shipment->id,
+                            'new_status' => $shipment->status,
+                            'tracking_number' => $shipment->tracking_number
+                        ]);
+                    } else {
+                        Log::warning("[Device 2] Failed to sync status to MySQL - record not found", [
+                            'shipment_id' => $shipment->id
+                        ]);
+                    }
                 }
-                
-                \Log::info("Auto-replicated shipment ID {$shipment->id} from {$currentConnection} to {$targetConnection}");
             } catch (\Exception $e) {
-                \Log::error("Failed to auto-replicate shipment: " . $e->getMessage(), [
-                    'shipment_id' => $shipment->id,
-                    'error' => $e->getMessage()
-                ]);
-            }
-        });
-        
-        // Also handle deletion
-        static::deleted(function ($shipment) {
-            try {
-                // Get the current connection name
-                $currentConnection = $shipment->getConnectionName() ?: config('database.default');
-                
-                // Determine the target connection
-                $targetConnection = ($currentConnection === 'mysql') ? 'pgsql' : 'mysql';
-                
-                // Delete from target database
-                DB::connection($targetConnection)
-                    ->table('shipments')
-                    ->where('id', $shipment->id)
-                    ->delete();
-                
-                \Log::info("Auto-deleted shipment ID {$shipment->id} from {$targetConnection}");
-            } catch (\Exception $e) {
-                \Log::error("Failed to auto-delete shipment: " . $e->getMessage(), [
+                Log::error("[Device 2] Failed to sync status to MySQL: " . $e->getMessage(), [
                     'shipment_id' => $shipment->id,
                     'error' => $e->getMessage()
                 ]);
