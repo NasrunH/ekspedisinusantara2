@@ -50,10 +50,11 @@
                             <label for="weight" class="form-label">Berat (kg) <span class="text-danger">*</span></label>
                             <input type="number" class="form-control @error('weight') is-invalid @enderror" 
                                    id="weight" name="weight" value="{{ old('weight') }}" 
-                                   step="0.01" min="0.01" required>
+                                   step="0.01" min="0.01" placeholder="2.5" required>
                             @error('weight')
                                 <div class="invalid-feedback">{{ $message }}</div>
                             @enderror
+                            <small class="form-text text-muted">Masukkan berat dalam kilogram (kg)</small>
                         </div>
                         
                         <div class="col-md-6">

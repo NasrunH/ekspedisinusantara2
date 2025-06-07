@@ -47,9 +47,9 @@
                     </a>
                 </div>
                 <div class="col-md-2 d-flex align-items-end">
-                    <button type="button" class="btn btn-info" onclick="syncDatabases()">
+                    <button type="button" class="btn btn-info" id="syncButton" onclick="syncDatabases()">
                         <i class="fas fa-sync-alt me-1"></i>
-                        Sync DB
+                        <span id="syncText">Sync DB</span>
                     </button>
                 </div>
             </div>
@@ -93,7 +93,7 @@
                                         {{ $shipment->status_label }}
                                     </span>
                                 </td>
-                                <td>{{ $shipment->created_at->format('d/m/Y H:i') }}</td>
+                                <td>{{ $shipment->created_at }}</td>
                                 <td>
                                     <div class="btn-group btn-group-sm" role="group">
                                         <a href="{{ route('shipments.show', $shipment) }}" 
@@ -120,8 +120,8 @@
             <div class="d-flex justify-content-between align-items-center mt-3">
                 <div>
                     <small class="text-muted">
-                        Menampilkan {{ $shipments->firstItem() }} - {{ $shipments->lastItem() }} 
-                        dari {{ $shipments->total() }} pengiriman
+                        Menampilkan {{ $shipments->firstItem() ?? 0 }} - {{ $shipments->lastItem() ?? 0 }} 
+                        dari {{ $shipments->total() ?? 0 }} pengiriman
                     </small>
                 </div>
                 <div>
@@ -165,6 +165,24 @@
     </div>
 </div>
 
+<!-- Modal Sinkronisasi -->
+<div class="modal fade" id="syncResultModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Hasil Sinkronisasi</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="syncResultBody">
+                Sedang melakukan sinkronisasi...
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Oke</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @push('scripts')
 <script>
 function deleteShipment(id) {
@@ -176,32 +194,91 @@ function deleteShipment(id) {
 }
 
 function syncDatabases() {
-    const button = event.target;
-    const originalText = button.innerHTML;
+    const button = document.getElementById('syncButton');
+    const syncText = document.getElementById('syncText');
+    const originalText = syncText.innerHTML;
     
-    button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Syncing...';
     button.disabled = true;
+    syncText.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Syncing...';
+    
+    // Tampilkan modal
+    const resultModal = new bootstrap.Modal(document.getElementById('syncResultModal'));
+    const resultBody = document.getElementById('syncResultBody');
+    resultBody.innerHTML = '<div class="text-center"><span class="spinner-border" role="status"></span><p class="mt-3">Sedang melakukan sinkronisasi database...</p></div>';
+    resultModal.show();
+    
+    // Get CSRF token
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
     
     fetch('/api/sync-databases', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-        }
+            'X-CSRF-TOKEN': csrfToken || '',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json'
+        },
+        credentials: 'same-origin'
     })
-    .then(response => response.json())
+    .then(response => {
+        // Check if response is ok
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            throw new Error('Response bukan JSON yang valid');
+        }
+        
+        return response.json();
+    })
     .then(data => {
         if (data.success) {
-            alert(`Sinkronisasi berhasil! ${data.synced_records} record telah disinkronkan.`);
+            let warningsHtml = '';
+            if (data.warnings && data.warnings.length > 0) {
+                warningsHtml = `
+                    <div class="alert alert-warning mt-3">
+                        <strong>Peringatan:</strong>
+                        <ul class="mb-0 mt-2">
+                            ${data.warnings.map(warning => `<li>${warning}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            resultBody.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle me-2"></i>
+                    ${data.message}
+                </div>
+                <p>Jumlah data yang disinkronkan: <strong>${data.synced_records}</strong></p>
+                ${warningsHtml}
+            `;
         } else {
-            alert('Gagal melakukan sinkronisasi: ' + data.message);
+            resultBody.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-circle me-2"></i>
+                    ${data.message}
+                </div>
+                <p>Silakan periksa koneksi database dan coba lagi.</p>
+            `;
         }
     })
     .catch(error => {
-        alert('Terjadi kesalahan saat sinkronisasi database.');
+        console.error('Sync error:', error);
+        resultBody.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle me-2"></i>
+                Terjadi kesalahan saat sinkronisasi database.
+            </div>
+            <p>Detail error: ${error.message || 'Unknown error'}</p>
+            <p>Silakan periksa koneksi database dan coba lagi.</p>
+        `;
     })
     .finally(() => {
-        button.innerHTML = originalText;
+        syncText.innerHTML = originalText;
         button.disabled = false;
     });
 }
